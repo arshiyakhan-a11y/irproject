@@ -1,0 +1,496 @@
+// lib/main.dart
+// ColorHunt + IR/TM search: BM25 + Cosine (text + color) + Weighted Fusion
+// Copy into Flutter project's lib/main.dart
+
+import 'dart:math';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+void main() => runApp(const ColorHuntIRApp());
+
+class ColorHuntIRApp extends StatelessWidget {
+  const ColorHuntIRApp({super.key});
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'ColorHunt IR Search',
+      theme: ThemeData(useMaterial3: true),
+      home: const HomeScreen(),
+    );
+  }
+}
+
+/// ------------------ Data model ------------------
+class Palette {
+  final String id;
+  final String title;
+  final List<String> tags; // textual tokens / tags for IR
+  final List<String> colors; // list of hex strings like "#FFAA00"
+
+  Palette({
+    required this.id,
+    required this.title,
+    required this.tags,
+    required this.colors,
+  });
+
+  List<double> getColorVector() {
+    // average RGB vector normalized (3 dims)
+    double r = 0, g = 0, b = 0;
+    for (var h in colors) {
+      final c = _hexToColor(h);
+      r += c.red / 255.0;
+      g += c.green / 255.0;
+      b += c.blue / 255.0;
+    }
+    final n = colors.length.toDouble();
+    return [r / n, g / n, b / n];
+  }
+}
+
+/// ------------------ Utilities ------------------
+Color _hexToColor(String hex) {
+  final h = hex.replaceAll('#', '');
+  final v = int.parse(h.length == 6 ? 'FF$h' : h, radix: 16);
+  return Color(v);
+}
+
+String normalizeToken(String s) {
+  return s.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), ' ').trim();
+}
+
+List<String> tokenize(String s) {
+  return normalizeToken(s).split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
+}
+
+double dot(List<double> a, List<double> b) {
+  double sum = 0;
+  for (int i = 0; i < a.length; i++) sum += a[i] * b[i];
+  return sum;
+}
+
+double magnitude(List<double> a) {
+  double s = 0;
+  for (var v in a) s += v * v;
+  return sqrt(s);
+}
+
+double cosineSim(List<double> a, List<double> b) {
+  final magA = magnitude(a);
+  final magB = magnitude(b);
+  if (magA == 0 || magB == 0) return 0.0;
+  return dot(a, b) / (magA * magB);
+}
+
+/// ------------------ BM25 Implementation ------------------
+/// Simple BM25 implementation with corpus built from palette tags+title
+class BM25 {
+  final List<List<String>> docs;
+  final int N;
+  final Map<String, int> df = {};
+  final List<Map<String, int>> tfs = [];
+  final List<int> docLengths = [];
+  double avgDocLen = 0.0;
+  final double k1;
+  final double b;
+
+  BM25({
+    required this.docs,
+    this.k1 = 1.5,
+    this.b = 0.75,
+  }) : N = docs.length {
+    _initialize();
+  }
+
+  void _initialize() {
+    int totalLen = 0;
+    for (var doc in docs) {
+      final tf = <String, int>{};
+      for (var t in doc) {
+        tf[t] = (tf[t] ?? 0) + 1;
+      }
+      tfs.add(tf);
+      docLengths.add(doc.length);
+      totalLen += doc.length;
+      for (var term in tf.keys) {
+        df[term] = (df[term] ?? 0) + 1;
+      }
+    }
+    avgDocLen = totalLen / N;
+  }
+
+  double idf(String term) {
+    final docFreq = df[term] ?? 0;
+    // BM25 idf variant with +0.5 smoothing
+    return log(1 + (N - docFreq + 0.5) / (docFreq + 0.5));
+  }
+
+  double score(int docIndex, List<String> queryTokens) {
+    final tf = tfs[docIndex];
+    double score = 0.0;
+    final dl = docLengths[docIndex];
+    for (var term in queryTokens) {
+      if (!tf.containsKey(term)) continue;
+      final f = tf[term]!.toDouble();
+      final numerator = f * (k1 + 1);
+      final denom = f + k1 * (1 - b + b * dl / avgDocLen);
+      score += idf(term) * (numerator / denom);
+    }
+    return score;
+  }
+}
+
+/// ------------------ TF-IDF for tokens -> vector space for cosine ------------------
+class TfIdf {
+  final List<List<String>> docs;
+  final Map<String, int> df = {};
+  final List<Map<String, double>> tfidfDocs = [];
+  final List<String> vocabulary = [];
+
+  TfIdf(this.docs) {
+    _build();
+  }
+
+  void _build() {
+    // compute df
+    for (var doc in docs) {
+      final seen = <String>{};
+      for (var t in doc) {
+        if (!seen.contains(t)) {
+          df[t] = (df[t] ?? 0) + 1;
+          seen.add(t);
+        }
+      }
+    }
+    vocabulary.addAll(df.keys);
+    // compute TF-IDF vectors
+    final N = docs.length;
+    for (var doc in docs) {
+      final tf = <String, int>{};
+      for (var t in doc) tf[t] = (tf[t] ?? 0) + 1;
+      final docVec = <String, double>{};
+      for (var term in vocabulary) {
+        final f = tf[term] ?? 0;
+        if (f == 0) continue;
+        final idf = log(N / (1 + (df[term] ?? 0)));
+        docVec[term] = f * idf;
+      }
+      tfidfDocs.add(docVec);
+    }
+  }
+
+  List<double> vectorForDocIndex(int idx) {
+    final map = tfidfDocs[idx];
+    return vocabulary.map((t) => map[t] ?? 0.0).toList();
+  }
+
+  List<double> vectorForQuery(List<String> tokens) {
+    final tf = <String, int>{};
+    for (var t in tokens) tf[t] = (tf[t] ?? 0) + 1;
+    final N = docs.length;
+    return vocabulary.map((term) {
+      final f = tf[term] ?? 0;
+      final idf = log(N / (1 + (df[term] ?? 0)));
+      return f * idf;
+    }).toList();
+  }
+}
+
+/// ------------------ Example Palettes (sample dataset) ------------------
+final samplePalettes = <Palette>[
+  Palette(
+    id: 'p1',
+    title: 'Sunset Bliss',
+    tags: ['sunset', 'warm', 'orange', 'coral', 'vibrant'],
+    colors: ['#FF6B6B', '#FFD166', '#FF9F1C', '#F5C6AA'],
+  ),
+  Palette(
+    id: 'p2',
+    title: 'Ocean Calm',
+    tags: ['ocean', 'blue', 'calm', 'teal', 'sea'],
+    colors: ['#2EC4B6', '#56CCF2', '#0B7285', '#E6F9F8'],
+  ),
+  Palette(
+    id: 'p3',
+    title: 'Forest Walk',
+    tags: ['forest', 'green', 'earth', 'olive', 'natural'],
+    colors: ['#2F5233', '#97BC62', '#DDE9B6', '#5C7C5C'],
+  ),
+  Palette(
+    id: 'p4',
+    title: 'Pastel Dream',
+    tags: ['pastel', 'soft', 'pink', 'lavender', 'mint'],
+    colors: ['#F7D6E0', '#C0E0DE', '#DAD2F3', '#FFF0C9'],
+  ),
+  Palette(
+    id: 'p5',
+    title: 'Monochrome Elegance',
+    tags: ['black', 'white', 'grey', 'minimal', 'elegant'],
+    colors: ['#111111', '#333333', '#888888', '#EEEEEE'],
+  ),
+];
+
+/// ------------------ Main Screen with search and fusion ------------------
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  late List<List<String>> docsTokens;
+  late BM25 bm25;
+  late TfIdf tfidf;
+
+  String query = '';
+  double wBm25 = 0.5;
+  double wTextCos = 0.3;
+  double wColorCos = 0.2;
+
+  @override
+  void initState() {
+    super.initState();
+    // build tokens from title + tags (simple)
+    docsTokens = samplePalettes
+        .map((p) => ([p.title] + p.tags).join(' ').toLowerCase())
+        .map((s) => tokenize(s))
+        .toList();
+
+    bm25 = BM25(docs: docsTokens);
+    tfidf = TfIdf(docsTokens);
+  }
+
+  List<_ScoredPalette> searchAndRank(String q) {
+    final qTokens = tokenize(q);
+    // BM25 score per doc
+    final bmScores =
+        List.generate(samplePalettes.length, (i) => bm25.score(i, qTokens));
+
+    // TF-IDF cosine for text
+    final qVec = tfidf.vectorForQuery(qTokens);
+    final docVectors = List.generate(samplePalettes.length, (i) => tfidf.vectorForDocIndex(i));
+    final textCos = List.generate(samplePalettes.length, (i) => cosineSim(qVec, docVectors[i]));
+
+    // color cosine: compute color vector for query if query contains color hex like #FFAA00
+    // or when query contains color name tokens, we won't map names to color here — but you can extend
+    // Instead we compute color similarity between the query's prototype color (if any) or else 0.
+    // For demo we attempt to parse first hex in query; otherwise zero vector.
+    List<double>? queryColorVec;
+    final hexMatch = RegExp(r'#([A-Fa-f0-9]{6})').firstMatch(q);
+    if (hexMatch != null) {
+      final hex = '#${hexMatch.group(1)!}';
+      final c = _hexToColor(hex);
+      queryColorVec = [c.red / 255.0, c.green / 255.0, c.blue / 255.0];
+    }
+
+    final colorCos = List.generate(samplePalettes.length, (i) {
+      if (queryColorVec == null) return 0.0;
+      return cosineSim(queryColorVec!, samplePalettes[i].getColorVector());
+    });
+
+    // normalize scores before fusion (min-max across each scoring vector)
+    double norm(List<double> arr, int idx) {
+      final minv = arr.reduce(min);
+      final maxv = arr.reduce(max);
+      if (maxv - minv == 0) return 0.0;
+      return (arr[idx] - minv) / (maxv - minv);
+    }
+
+    final results = <_ScoredPalette>[];
+    for (int i = 0; i < samplePalettes.length; i++) {
+      final nbm = norm(bmScores, i);
+      final ntc = norm(textCos, i);
+      final ncc = norm(colorCos, i);
+      final fused = (wBm25 * nbm) + (wTextCos * ntc) + (wColorCos * ncc);
+      results.add(_ScoredPalette(
+        palette: samplePalettes[i],
+        bm25: nbm,
+        textCos: ntc,
+        colorCos: ncc,
+        fusedScore: fused,
+      ));
+    }
+
+    results.sort((a, b) => b.fusedScore.compareTo(a.fusedScore));
+    return results;
+  }
+
+  void _onSearchChanged(String v) {
+    setState(() {
+      query = v;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ranked = searchAndRank(query.isEmpty ? '' : query);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('ColorHunt — IR Search Demo'),
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black87,
+        elevation: 2,
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: Column(children: [
+          // Search input
+          Row(children: [
+            Expanded(
+              child: TextField(
+                onChanged: _onSearchChanged,
+                decoration: InputDecoration(
+                  hintText: 'Search by tag, title, or paste hex like #FF6B6B',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            ElevatedButton(
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: query));
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Query copied')));
+              },
+              child: const Text('Copy Query'),
+            )
+          ]),
+          const SizedBox(height: 10),
+
+          // Weight sliders (fusion)
+          Row(children: [
+            Expanded(child: _weightSlider('BM25', wBm25, (v) => setState(() => wBm25 = v))),
+            const SizedBox(width: 8),
+            Expanded(child: _weightSlider('TextCos', wTextCos, (v) => setState(() => wTextCos = v))),
+            const SizedBox(width: 8),
+            Expanded(child: _weightSlider('ColorCos', wColorCos, (v) => setState(() => wColorCos = v))),
+          ]),
+          const SizedBox(height: 6),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text('Weights sum: ${(wBm25 + wTextCos + wColorCos).toStringAsFixed(2)}    '
+                'Adjust to tune fusion (recommend sum = 1.0)'),
+          ),
+          const SizedBox(height: 12),
+
+          // Results list (top horizontal grid)
+          Expanded(
+            child: GridView.builder(
+              itemCount: ranked.length,
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2, childAspectRatio: 1.25, crossAxisSpacing: 12, mainAxisSpacing: 12),
+              itemBuilder: (context, index) {
+                final r = ranked[index];
+                return _PaletteResultCard(r: r);
+              },
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Widget _weightSlider(String label, double value, ValueChanged<double> onChanged) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('$label: ${value.toStringAsFixed(2)}'),
+        Slider(value: value, min: 0.0, max: 1.0, divisions: 20, onChanged: onChanged),
+      ],
+    );
+  }
+}
+
+class _ScoredPalette {
+  final Palette palette;
+  final double bm25;
+  final double textCos;
+  final double colorCos;
+  final double fusedScore;
+
+  _ScoredPalette({
+    required this.palette,
+    required this.bm25,
+    required this.textCos,
+    required this.colorCos,
+    required this.fusedScore,
+  });
+}
+
+/// ------------------ UI Card for result ------------------
+class _PaletteResultCard extends StatelessWidget {
+  final _ScoredPalette r;
+  const _PaletteResultCard({required this.r, super.key});
+
+  String toHex(Color color) => '#${color.value.toRadixString(16).substring(2).toUpperCase()}';
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        // show full detail
+        showDialog(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: Text(r.palette.title),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(children: r.palette.colors.map((h) => Expanded(child: Container(height: 60, color: _hexToColor(h)))).toList()),
+                const SizedBox(height: 8),
+                Text('Score: ${r.fusedScore.toStringAsFixed(3)}'),
+                Text('BM25: ${r.bm25.toStringAsFixed(3)}  TextCos: ${r.textCos.toStringAsFixed(3)}  ColorCos: ${r.colorCos.toStringAsFixed(3)}'),
+                const SizedBox(height: 8),
+                Wrap(spacing: 6, children: r.palette.tags.map((t) => Chip(label: Text(t))).toList()),
+              ],
+            ),
+            actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
+          ),
+        );
+      },
+      child: Container(
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), boxShadow: const [
+          BoxShadow(color: Colors.black12, blurRadius: 6),
+        ]),
+        child: Column(
+          children: [
+            Expanded(
+              child: Row(children: r.palette.colors.map((h) => Expanded(child: Container(decoration: BoxDecoration(color: _hexToColor(h))))).toList()),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: Column(children: [
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                  Flexible(child: Text(r.palette.title, style: const TextStyle(fontWeight: FontWeight.bold))),
+                  Text(r.fusedScore.toStringAsFixed(2)),
+                ]),
+                const SizedBox(height: 6),
+                Row(children: [
+                  _miniBar('B', r.bm25),
+                  const SizedBox(width: 6),
+                  _miniBar('T', r.textCos),
+                  const SizedBox(width: 6),
+                  _miniBar('C', r.colorCos),
+                ])
+              ]),
+            )
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _miniBar(String label, double v) {
+    return Expanded(
+      child: Row(
+        children: [
+          Text(label, style: const TextStyle(fontSize: 12)),
+          const SizedBox(width: 4),
+          Expanded(
+            child: LinearProgressIndicator(value: v, minHeight: 6),
+          )
+        ],
+      ),
+    );
+  }
+}
