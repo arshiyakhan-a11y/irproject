@@ -24,11 +24,19 @@ class _ColorHuntExplorerState extends State<ColorHuntExplorer> {
   void initState() {
     super.initState();
 
+    // --------------------------
+    // IR / Data Mining Concept
+    // --------------------------
     // Get logged-in user info from FirebaseAuth
+    // This can act as a user profile for personalized recommendations.
     final user = FirebaseAuth.instance.currentUser;
     userName = user?.displayName ?? "Guest User";
     userEmail = user?.email ?? "guest@example.com";
 
+    // --------------------------
+    // Slide 1: Basic IR/Clustering Example
+    // --------------------------
+    // Show users a general introduction slide.
     slides.add(
       Slide(
         title: "Explore Color Schemes",
@@ -52,6 +60,11 @@ class _ColorHuntExplorerState extends State<ColorHuntExplorer> {
       ),
     );
 
+    // --------------------------
+    // Slide 2: Personalized Recommendation (Data Mining Concepts)
+    // --------------------------
+    // This slide introduces IR (Information Retrieval) and Association Rules
+    // to suggest color schemes based on previous user behavior.
     slides.add(
       Slide(
         widgetTitle: Container(
@@ -85,6 +98,13 @@ class _ColorHuntExplorerState extends State<ColorHuntExplorer> {
               const SizedBox(height: 20),
               ElevatedButton(
                 onPressed: () {
+                  // --------------------------
+                  // IR / Clustering Concept
+                  // --------------------------
+                  // This button navigates to a WebView where users can explore
+                  // color palettes. Behind the scenes, the app could retrieve
+                  // relevant palettes using IR techniques (matching user's favorite colors)
+                  // or cluster colors based on similarity for better recommendations.
                   Navigator.push(
                     context,
                     MaterialPageRoute(builder: (context) => const ColorHuntWebView()),
@@ -122,6 +142,12 @@ class _ColorHuntExplorerState extends State<ColorHuntExplorer> {
           foregroundColor: Colors.white,
         ),
         onDonePress: () {
+          // --------------------------
+          // Classification / Personalization
+          // --------------------------
+          // After the intro, navigate to HomeScreen.
+          // Here, the app could classify users based on profile info
+          // or previous selections to recommend personalized palettes
           Navigator.push(
             context,
             MaterialPageRoute(
@@ -133,6 +159,7 @@ class _ColorHuntExplorerState extends State<ColorHuntExplorer> {
           );
         },
         onSkipPress: () {
+          // Same as onDonePress, allows skipping intro
           Navigator.push(
             context,
             MaterialPageRoute(
@@ -144,6 +171,12 @@ class _ColorHuntExplorerState extends State<ColorHuntExplorer> {
           );
         },
         onTabChangeCompleted: (index) {
+          // --------------------------
+          // Tracking / Data Mining
+          // --------------------------
+          // Here you could track which slide the user is viewing
+          // and use it as input for clustering or association rule mining
+          // to improve future recommendations.
           setState(() {
             currentIndex = index;
           });
