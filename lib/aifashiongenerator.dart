@@ -20,10 +20,12 @@ class FashionDesignerScreen extends StatefulWidget {
 
 class _FashionDesignerScreenState extends State<FashionDesignerScreen> {
   final TextEditingController _promptController = TextEditingController();
+  final TextEditingController _searchController = TextEditingController();
   String? _generatedImageUrl;
   bool _loading = false;
+  List<Map<String, String>> _searchResults = [];
 
-  final String openAIKey = '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'; // Replace with your OpenAI key
+  final String openAIKey = '<YOUR_OPENAI_KEY>';
 
   final List<String> _categories = [
     'Lehanga',
@@ -34,6 +36,7 @@ class _FashionDesignerScreenState extends State<FashionDesignerScreen> {
   ];
   String _selectedCategory = 'Lehanga';
 
+  // ---------------- Generate AI Fashion Design ----------------
   Future<void> generateImage(String prompt) async {
     setState(() {
       _loading = true;
@@ -57,9 +60,8 @@ class _FashionDesignerScreenState extends State<FashionDesignerScreen> {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        final imageUrl = data['data'][0]['url'];
         setState(() {
-          _generatedImageUrl = imageUrl;
+          _generatedImageUrl = data['data'][0]['url'];
         });
       } else {
         throw Exception('Failed to generate image: ${response.body}');
@@ -84,9 +86,11 @@ class _FashionDesignerScreenState extends State<FashionDesignerScreen> {
     }
 
     final effectiveCategory =
-    _selectedCategory.toLowerCase() == 'informal' ? 'informal' : _selectedCategory.toLowerCase();
+        _selectedCategory.toLowerCase() == 'informal'
+            ? 'informal'
+            : _selectedCategory.toLowerCase();
     final prompt =
-        'Fashion outfit in $effectiveCategory style. $userPrompt. Focus only on fashion design and clothing. Exclude backgrounds like houses, flowers, or nature.';
+        'Fashion outfit in $effectiveCategory style. $userPrompt. Focus only on fashion design and clothing.';
 
     generateImage(prompt);
   }
@@ -97,6 +101,7 @@ class _FashionDesignerScreenState extends State<FashionDesignerScreen> {
     }
   }
 
+  // ---------------- Save Design (Data Mining: track saved items) ----------------
   Future<void> _onSavePressed() async {
     if (_generatedImageUrl == null) return;
 
@@ -106,6 +111,7 @@ class _FashionDesignerScreenState extends State<FashionDesignerScreen> {
     final newEntry = jsonEncode({
       'url': _generatedImageUrl,
       'category': _selectedCategory,
+      'prompt': _promptController.text.trim(),
     });
 
     if (!savedData.contains(newEntry)) {
@@ -124,6 +130,32 @@ class _FashionDesignerScreenState extends State<FashionDesignerScreen> {
       context,
       MaterialPageRoute(builder: (context) => const AIGalleryScreen()),
     );
+  }
+
+  // ---------------- IR Search in saved designs ----------------
+  Future<void> _searchDesigns(String query) async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedData = prefs.getStringList('saved_images') ?? [];
+
+    List<Map<String, String>> results = [];
+
+    for (var entry in savedData) {
+      try {
+        final data = jsonDecode(entry);
+        final prompt = (data['prompt'] ?? '').toLowerCase();
+        if (prompt.contains(query.toLowerCase())) {
+          results.add({
+            'url': data['url'],
+            'category': data['category'] ?? 'Informal',
+            'prompt': data['prompt'] ?? ''
+          });
+        }
+      } catch (_) {}
+    }
+
+    setState(() {
+      _searchResults = results;
+    });
   }
 
   @override
@@ -151,6 +183,7 @@ class _FashionDesignerScreenState extends State<FashionDesignerScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // ---------------- Prompt Input ----------------
             Text(
               'Describe your fashion idea:',
               style: Theme.of(context)
@@ -170,6 +203,8 @@ class _FashionDesignerScreenState extends State<FashionDesignerScreen> {
               ),
             ),
             const SizedBox(height: 15),
+
+            // ---------------- Category Selection ----------------
             Row(
               children: [
                 const Text(
@@ -181,9 +216,9 @@ class _FashionDesignerScreenState extends State<FashionDesignerScreen> {
                   value: _selectedCategory,
                   items: _categories
                       .map((cat) => DropdownMenuItem(
-                    value: cat,
-                    child: Text(cat),
-                  ))
+                            value: cat,
+                            child: Text(cat),
+                          ))
                       .toList(),
                   onChanged: (value) {
                     if (value != null) {
@@ -196,6 +231,8 @@ class _FashionDesignerScreenState extends State<FashionDesignerScreen> {
               ],
             ),
             const SizedBox(height: 15),
+
+            // ---------------- Generate Button ----------------
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
@@ -211,12 +248,16 @@ class _FashionDesignerScreenState extends State<FashionDesignerScreen> {
                 ),
               ),
             ),
-            const SizedBox(height: 25),
+
+            const SizedBox(height: 20),
+
+            // ---------------- Generated Image ----------------
             if (_generatedImageUrl != null)
               ClipRRect(
                 borderRadius: BorderRadius.circular(12),
                 child: Image.network(_generatedImageUrl!),
               ),
+
             if (_loading)
               const Center(
                 child: Padding(
@@ -224,7 +265,10 @@ class _FashionDesignerScreenState extends State<FashionDesignerScreen> {
                   child: CircularProgressIndicator(color: Colors.teal),
                 ),
               ),
+
             const SizedBox(height: 20),
+
+            // ---------------- Save / Share ----------------
             if (_generatedImageUrl != null)
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -247,6 +291,41 @@ class _FashionDesignerScreenState extends State<FashionDesignerScreen> {
                   ),
                 ],
               ),
+
+            const SizedBox(height: 25),
+
+            // ---------------- IR Search ----------------
+            TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                labelText: 'Search Saved Designs (Keyword)',
+                suffixIcon: IconButton(
+                  icon: const Icon(Icons.search),
+                  onPressed: () {
+                    _searchDesigns(_searchController.text.trim());
+                  },
+                ),
+                border: const OutlineInputBorder(),
+              ),
+            ),
+
+            const SizedBox(height: 15),
+
+            // ---------------- Search Results ----------------
+            if (_searchResults.isNotEmpty)
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: _searchResults.map((res) {
+                  return Card(
+                    margin: const EdgeInsets.symmetric(vertical: 6),
+                    child: ListTile(
+                      title: Text(res['prompt'] ?? ''),
+                      subtitle: Text('Category: ${res['category']}'),
+                      leading: Image.network(res['url']!, width: 50, height: 50, fit: BoxFit.cover),
+                    ),
+                  );
+                }).toList(),
+              ),
           ],
         ),
       ),
@@ -254,6 +333,7 @@ class _FashionDesignerScreenState extends State<FashionDesignerScreen> {
   }
 }
 
+// ---------------- Gallery Screen ----------------
 class AIGalleryScreen extends StatefulWidget {
   const AIGalleryScreen({super.key});
 
@@ -365,88 +445,88 @@ class _AIGalleryScreenState extends State<AIGalleryScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : categoryImages.isEmpty
-          ? Center(
-        child: Text(
-          'No saved designs yet.',
-          style: TextStyle(fontSize: 18, color: teal.shade700),
-        ),
-      )
-          : RefreshIndicator(
-        onRefresh: _loadSavedImages,
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: categoryImages.entries.map((entry) {
-            final category = entry.key;
-            final images = entry.value;
+              ? Center(
+                  child: Text(
+                    'No saved designs yet.',
+                    style: TextStyle(fontSize: 18, color: teal.shade700),
+                  ),
+                )
+              : RefreshIndicator(
+                  onRefresh: _loadSavedImages,
+                  child: ListView(
+                    padding: const EdgeInsets.all(16),
+                    children: categoryImages.entries.map((entry) {
+                      final category = entry.key;
+                      final images = entry.value;
 
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  category,
-                  style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                    color: teal.shade800,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                GridView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: images.length,
-                  gridDelegate:
-                  const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    mainAxisSpacing: 12,
-                    crossAxisSpacing: 12,
-                    childAspectRatio: 1,
-                  ),
-                  itemBuilder: (context, index) {
-                    final url = images[index];
-                    return Stack(
-                      children: [
-                        Card(
-                          elevation: 5,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(16),
-                            child: Image.network(
-                              url,
-                              fit: BoxFit.cover,
-                              width: double.infinity,
-                              height: double.infinity,
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            category,
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                              color: teal.shade800,
                             ),
                           ),
-                        ),
-                        Positioned(
-                          top: 8,
-                          right: 8,
-                          child: CircleAvatar(
-                            backgroundColor: Colors.black54,
-                            child: IconButton(
-                              icon: const Icon(
-                                Icons.delete,
-                                color: Colors.white,
-                                size: 20,
-                              ),
-                              onPressed: () =>
-                                  _confirmDelete(category, url),
+                          const SizedBox(height: 12),
+                          GridView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemCount: images.length,
+                            gridDelegate:
+                                const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 2,
+                              mainAxisSpacing: 12,
+                              crossAxisSpacing: 12,
+                              childAspectRatio: 1,
                             ),
+                            itemBuilder: (context, index) {
+                              final url = images[index];
+                              return Stack(
+                                children: [
+                                  Card(
+                                    elevation: 5,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(16),
+                                    ),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(16),
+                                      child: Image.network(
+                                        url,
+                                        fit: BoxFit.cover,
+                                        width: double.infinity,
+                                        height: double.infinity,
+                                      ),
+                                    ),
+                                  ),
+                                  Positioned(
+                                    top: 8,
+                                    right: 8,
+                                    child: CircleAvatar(
+                                      backgroundColor: Colors.black54,
+                                      child: IconButton(
+                                        icon: const Icon(
+                                          Icons.delete,
+                                          color: Colors.white,
+                                          size: 20,
+                                        ),
+                                        onPressed: () =>
+                                            _confirmDelete(category, url),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              );
+                            },
                           ),
-                        ),
-                      ],
-                    );
-                  },
+                          const SizedBox(height: 32),
+                        ],
+                      );
+                    }).toList(),
+                  ),
                 ),
-                const SizedBox(height: 32),
-              ],
-            );
-          }).toList(),
-        ),
-      ),
     );
   }
 }
