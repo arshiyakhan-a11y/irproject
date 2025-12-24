@@ -18,6 +18,12 @@ class _OrderState extends State<Order> {
   var slides = <Slide>[];
   int currentIndex = 0;
 
+  // --------------------------
+  // Data Mining Concept:
+  // --------------------------
+  // User information can be used for personalization:
+  // - Collaborative Filtering: Recommend products based on similar users
+  // - User Profiling: Track favorite styles/colors for tailored suggestions
   String userName = "Guest";
   String userEmail = "guest@example.com";
 
@@ -25,12 +31,14 @@ class _OrderState extends State<Order> {
   void initState() {
     super.initState();
 
+    // Get Firebase logged-in user info
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
       userName = user.displayName ?? "User";
       userEmail = user.email ?? "user@example.com";
     }
 
+    // Slide 1: Introduction to Virtual Try-On
     slides.add(
       Slide(
         title: "Virtual StyleMe",
@@ -54,6 +62,7 @@ class _OrderState extends State<Order> {
       ),
     );
 
+    // Slide 2: Order & Purchase
     slides.add(
       Slide(
         widgetTitle: Column(
@@ -84,6 +93,15 @@ class _OrderState extends State<Order> {
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 20),
+
+            // --------------------------
+            // Data Mining Concept:
+            // --------------------------
+            // This button triggers Virtual Try-On.
+            // Backend can:
+            // 1. Collect try-on data for the user (preferences, sizes, styles)
+            // 2. Apply clustering on garments to suggest similar items
+            // 3. Use recommendation algorithms (content-based + collaborative filtering)
             ElevatedButton(
               onPressed: () {
                 Navigator.push(
