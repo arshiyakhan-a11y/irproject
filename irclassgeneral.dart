@@ -174,7 +174,7 @@ void main(){
   final ai=AIFashionGenerator0().generate("black casual outfit");
   ShoppingModule0().order(ai);
 
-  print("Final Hybrid IR Score: \$score");
 }
 """;
 }
+
