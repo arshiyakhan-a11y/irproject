@@ -43,6 +43,11 @@ class _AiStylistPageState extends State<AiStylistPage> {
   bool _loading = false;
   List<Map<String, String>> _realProducts = [];
 
+  // --------------------------
+  // IR/Data Mining Concept:
+  // --------------------------
+  // Using Google Custom Search as an Information Retrieval (IR) system
+  // to fetch real-time product data based on user preferences.
   static const String googleApiKey = 'AIzaSyB0mVhYZ9VXajjN65I32I8XqCzpxTS0Mzg';
   static const String googleCseId = 'b35e13d52c4934751';
 
@@ -54,6 +59,11 @@ class _AiStylistPageState extends State<AiStylistPage> {
   final TextEditingController _budgetController = TextEditingController();
 
   Future<void> fetchRealProducts() async {
+    // --------------------------
+    // Data Mining Concept:
+    // --------------------------
+    // Preference Filtering:
+    // Only search products if user has provided all critical features.
     if (eventType == null || ageGroup == null || budget == null || selectedColors.isEmpty || selectedBrands.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Please complete all preferences before searching products')),
@@ -66,7 +76,10 @@ class _AiStylistPageState extends State<AiStylistPage> {
       _realProducts.clear();
     });
 
-    // Enhanced brand terms for Google search
+    // --------------------------
+    // IR Concept:
+    // --------------------------
+    // Constructing query for Google Custom Search (IR retrieval query)
     final brandTerms = selectedBrands.map((b) {
       if (b == 'Maria B') return 'Maria B OR Maria.B OR Mariab';
       if (b == 'Bonanza Satrangi') return 'Bonanza OR Satrangi';
@@ -92,6 +105,11 @@ class _AiStylistPageState extends State<AiStylistPage> {
           return;
         }
 
+        // --------------------------
+        // Data Mining Concept:
+        // --------------------------
+        // Post-processing / Filtering:
+        // Filter retrieved items to match selected brands
         final filteredProducts = items.map<Map<String, String>>((item) {
           final pagemap = item['pagemap'] ?? {};
           final cseImage = (pagemap['cse_image'] as List?)?.first?['src'] ?? '';
@@ -105,6 +123,11 @@ class _AiStylistPageState extends State<AiStylistPage> {
         }).where((product) {
           final title = product['title']!.toLowerCase();
 
+          // --------------------------
+          // IR Concept:
+          // --------------------------
+          // Relevance scoring / Boolean Matching:
+          // Check if title contains any of the selected brands
           return selectedBrands.any((b) {
             final brandLower = b.toLowerCase();
             if (brandLower == 'maria b') {
@@ -139,6 +162,9 @@ class _AiStylistPageState extends State<AiStylistPage> {
     ));
   }
 
+  // --------------------------
+  // UI Concept: Chip Selection for Preferences
+  // --------------------------
   Widget buildChipSelection(String title, List<String> options, List<String> selectedList) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
