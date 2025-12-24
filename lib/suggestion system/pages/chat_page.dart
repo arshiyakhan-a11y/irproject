@@ -32,7 +32,22 @@ class Suggestion extends StatefulWidget {
   @override
   State<Suggestion> createState() => _SuggestionState();
 }
+class SuggestionSystem {
+  final HybridIREngine ir = HybridIREngine();
 
+  Outfit recommend(
+    List<Outfit> outfits,
+    Map<String, double> weights,
+    List<String> query,
+  ) {
+    outfits.sort((a, b) {
+      double scoreA = ir.rank(a, weights, query);
+      double scoreB = ir.rank(b, weights, query);
+      return scoreB.compareTo(scoreA);
+    });
+    return outfits.first;
+  }
+}
 class _SuggestionState extends State<Suggestion> {
   late OpenAI _openAI;
   final ChatUser _currentUser = ChatUser(id: '1', firstName: 'You');
