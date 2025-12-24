@@ -31,16 +31,21 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  // Adjust this base URL if your backend runs elsewhere (include http:// or https://)
+  // API Service: Connects Flutter front-end to backend model
   final api = ApiService(baseUrl: 'http://10.0.2.2:5000'); // Android emulator -> host machine
-  // For physical device or web replace with your server IP or domain:
-  // final api = ApiService(baseUrl: 'https://your-domain.com');
 
   PlatformFile? person;
   PlatformFile? garment;
   String? resultDataUrl;
   bool loading = false;
   String statusText = '';
+
+  // --------------------------
+  // Data Mining Concept:
+  // --------------------------
+  // These images (person and garment) can act as "data points".
+  // Later, we can use clustering on garment images to find similar styles/colors
+  // or use association rules to recommend garments that go well together.
 
   Future<void> pickPerson() async {
     final res = await FilePicker.platform.pickFiles(
@@ -62,11 +67,8 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => garment = res.files.first);
   }
 
-  // convert PlatformFile to File for mobile/desktop
   Future<File> _platformFileToFile(PlatformFile pf) async {
     if (kIsWeb) {
-      // On web we must write bytes to temp file in browser supported location - Not needed by http.MultipartFile.fromBytes
-      // However our ApiService expects a File (for simplicity) so we write to temp directory if possible.
       final bytes = pf.bytes;
       if (bytes == null) throw Exception('No bytes in web file');
       final dir = await getTemporaryDirectory();
@@ -87,6 +89,13 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  // --------------------------
+  // Submit images to backend
+  // --------------------------
+  // Backend can be enhanced with:
+  // 1. Classification: Detect garment type (shirt, dress, pants)
+  // 2. Clustering: Group garments by color, pattern, or style
+  // 3. Recommendation: Suggest similar garments from dataset
   Future<void> submitTryOn() async {
     if (person == null || garment == null) {
       setState(() => statusText = 'Select both person and garment images first.');
@@ -107,7 +116,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
       final resp = await api.tryOn(personFile: personFile, garmentFile: garmentFile);
 
-      // resp is expected to be a data URL (data:image/png;base64,...)
+      // --------------------------
+      // Data Mining Concept:
+      // --------------------------
+      // resp could be stored in a database to analyze:
+      // - Most popular garment types/colors (frequency analysis)
+      // - User preferences for future recommendations (user profiling)
       setState(() {
         resultDataUrl = resp;
         statusText = 'Try-on successful';
@@ -121,20 +135,15 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // Save data-url to device (mobile & web)
   Future<void> downloadResult() async {
     if (resultDataUrl == null) return;
     if (kIsWeb) {
-      // open in new tab
-      final encoded = Uri.encodeComponent(resultDataUrl!);
-      final url = 'data:application/octet-stream;charset=utf-8,${encoded}';
       await launchUrl(Uri.parse(resultDataUrl!));
     } else {
       final bytes = _dataUrlToBytes(resultDataUrl!);
       final dir = await getTemporaryDirectory();
       final file = File('${dir.path}/vton_result_${DateTime.now().millisecondsSinceEpoch}.png');
       await file.writeAsBytes(bytes);
-      // On mobile you may show Share dialog or open folder; for now we show the file path
       setState(() {
         statusText = 'Saved to ${file.path}';
       });
@@ -182,7 +191,11 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Virtual Try-On (Option A)'), backgroundColor: Colors.white, foregroundColor: Colors.black),
+      appBar: AppBar(
+          title: const Text('Virtual Try-On (Option A)'),
+          backgroundColor: Colors.white,
+          foregroundColor: Colors.black
+      ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(children: [
@@ -197,8 +210,7 @@ class _HomeScreenState extends State<HomeScreen> {
               label: const Text('Pick Person'),
             ),
             const SizedBox(width: 12),
-            if (person != null)
-              Text(person!.name, overflow: TextOverflow.ellipsis),
+            if (person != null) Text(person!.name, overflow: TextOverflow.ellipsis),
           ]),
           const Divider(height: 28),
 
